@@ -1,0 +1,28 @@
+# 每日內容日誌：今日寫過乜、邊啲到期回訪、邊啲市場應該有結果
+# 每晚送一次去 Telegram。呢個係你唯一需要「主動睇」嘅嘢。
+name: digest
+
+on:
+  schedule:
+    - cron: "0 20 * * *"   # UTC 20:00（英國夏令時 21:00 / 冬令時 20:00）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 送出每日日誌
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python src/run.py digest

@@ -1,0 +1,31 @@
+# Python 虛擬環境 —— 千祈唔好 commit，成幾百 MB
+.venv/
+venv/
+env/
+ENV/
+
+# Python 快取
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# 狀態檔嘅原子寫入暫存（見 common._write_json / tracker._write_all）
+state/*.tmp
+state/*.json.tmp
+state/*.csv.tmp
+
+# 本機密鑰 —— 真正嘅密鑰應該喺 GitHub Secrets，唔喺 repo
+.env
+.env.*
+*.key
+secrets.json
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# 編輯器
+.vscode/
+.idea/
+*.swp

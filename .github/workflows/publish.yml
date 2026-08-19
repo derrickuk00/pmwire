@@ -1,0 +1,66 @@
+# 發布：讀 Telegram 審批決定 → 發布已批准嘅 → 更新狀態
+# 你幾時撳批准都得，最多 15 分鐘內出街。唔撳就永遠唔會出街。
+name: publish
+
+on:
+  schedule:
+    # 每 15 分鐘。如果你用 private repo 想慳 Actions 分鐘數，改做 "*/30 * * * *"
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "唔真發文，只印出嚟睇"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pmwire-state
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 收審批 + 發布
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: python src/run.py publish
+
+      - name: 儲存狀態
+        run: |
+          set -e
+          git config user.name  "pmwire-bot"
+          git config user.email "pmwire-bot@users.noreply.github.com"
+          if git diff --quiet -- state/; then
+            echo "狀態冇變，唔使 commit"
+            exit 0
+          fi
+          git add state/
+          git commit -m "publish: 更新佇列 [skip ci]"
+          for i in 1 2 3 4 5; do
+            if git push; then echo "已推送"; exit 0; fi
+            echo "推送失敗，第 $i 次重試…"
+            git pull --rebase --autostash || true
+            sleep $((i * 3))
+          done
+          echo "::error::狀態推送失敗 5 次"
+          exit 1

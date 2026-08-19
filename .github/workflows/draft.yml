@@ -1,0 +1,67 @@
+# 起草：抓數據 → 選題 → 生成 → 守門 → 送去 Telegram 審批
+# 唔會發文。發文係 publish.yml 嘅事，而且淨係發你撳咗批准嘅。
+name: draft
+
+on:
+  schedule:
+    # 每日 16 個時段（約每 90 分鐘），涵蓋美、歐、亞三個時區嘅交易時間
+    # 全部係 UTC。英國夏令時 = UTC+1，冬令時 = UTC。
+    - cron: "0 1,2,4,5,7,8,10,11,13,14,16,17,19,20,22,23 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "唔真送 Telegram，只印出嚟睇"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# 同一時間只准一個 job 改 state/，避免兩個 run 互相覆蓋
+concurrency:
+  group: pmwire-state
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 起草
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: python src/run.py draft
+
+      - name: 儲存狀態
+        run: |
+          set -e
+          git config user.name  "pmwire-bot"
+          git config user.email "pmwire-bot@users.noreply.github.com"
+          if git diff --quiet -- state/; then
+            echo "狀態冇變，唔使 commit"
+            exit 0
+          fi
+          git add state/
+          git commit -m "draft: 更新佇列 [skip ci]"
+          # 對抗同時間嘅 publish job：最多試 5 次 rebase + push
+          for i in 1 2 3 4 5; do
+            if git push; then echo "已推送"; exit 0; fi
+            echo "推送失敗，第 $i 次重試…"
+            git pull --rebase --autostash || true
+            sleep $((i * 3))
+          done
+          echo "::error::狀態推送失敗 5 次"
+          exit 1

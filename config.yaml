@@ -1,0 +1,311 @@
+# ============================================================
+#  PM Wire — 設定檔
+#  改呢度就可以調整行為，唔使掂 code
+# ============================================================
+
+selection:
+  # 每次 run 揀幾多個 topic 出嚟做草稿
+  drafts_per_run: 1
+
+  # 一個 market 出過之後，幾多日內唔會再出（除非異動極大）
+  cooldown_days: 14
+  # 異動大過呢個（絕對值，機率點數）就無視冷卻期
+  cooldown_override_move: 0.15
+
+  # 硬性過濾：唔夠呢啲數就唔考慮
+  min_volume_24hr: 25000      # 美元。太靜嘅市場冇人有興趣
+  min_liquidity: 10000        # 美元。太淺嘅盤賠率係噪音唔係訊號
+  min_abs_move_24hr: 0.03     # 3 個機率點。低過呢個唔算「郁咗」
+  max_days_to_resolution: 400 # 太遠期嘅市場賠率冇資訊量
+  min_days_to_resolution: 1   # 今日就到期嘅唔寫（結果快過你出文）
+
+  # 價格帶：太接近定局嘅市場冇分析空間
+  # ⚠️ 2026-08-19 實測：一個 99.5%（顯示 100%）嘅市場過咗篩選。
+  #    賠率去到咁盡，「點解會郁」已經冇嘢好講。
+  min_price: 0.05
+  max_price: 0.95
+
+  # 主題過濾（類別由 classify.py 睇題目推斷，唔靠 Gamma metadata）
+  # ⚠️ 2026-08-19 實測：Gamma 個 category 欄位 100/100 全部係空。
+  #
+  # 排除體育：單場賽事賠率喺比賽期間會癲咁郁（實測見到一場棒球
+  # 一小時內郁 39 點），佔滿候選名單，而且分析價值近乎零 ——
+  # 文獻亦顯示體育校準斜率 1.08，即接近有效，冇結構性嘢好講。
+  blocked_categories: ["sports", "weather", "culture"]
+  # 留空 = 除咗 blocked 之外全部接受
+  allowed_categories: []
+
+  # 排除「價格階梯」市場（Will X be above $Y on <date> 呢類）
+  # ⚠️ 2026-08-19 實測：篩選後 43 個候選有 27 個係 crypto，幾乎全部係呢類。
+  #    佢哋嘅結果係現貨價嘅確定性函數 ——「點解郁咗」永遠答「現貨郁咗」，
+  #    冇成因之謎、冇可證偽解讀，寫十篇都係同一個故事。
+  #    注意：唔係排除加密貨幣。「SEC 批唔批 ETF」呢類照樣通過。
+  exclude_price_ladders: true
+
+  # 分類別成交額門檻。政治／地緣盤本身成交額細好多 ——
+  # ⚠️ 實測：1,200 個市場入面有 158 個政治盤，但只有 1 個過到篩選，
+  #    281 個被「成交額太低」殺死。統一門檻等於系統性歧視你論點嗰幾類。
+  min_volume_by_category:
+    geopolitics: 8000
+    politics: 8000
+    macro: 10000
+    tech: 15000
+    crypto: 40000      # 加密盤多而平庸，門檻反而要高
+    other: 25000
+
+  # 評分權重（相對值，唔使加埋等於 1）
+  #
+  # ⚠️ 2026-08-19 實測教訓：原本 move_1h 權重 45（高過 move_24h 嘅 30），
+  #    結果一場直播緊嘅棒球賽（一小時郁 39 點，但 24 小時只郁 4 點）
+  #    排第一。1 小時異動本身唔代表有嘢發生 —— 佢可能只係即時事件嘅噪音。
+  #    而家調轉：24 小時異動為主，1 小時只做加分，而且要有 24 小時佐證。
+  weights:
+    move_24h: 45.0       # 日內異動 —— 主要訊號
+    move_1h: 18.0        # 短期異動 —— 只做加分（見 corroborate 規則）
+    volume_24hr_log: 8.0 # log10(成交額)。獎勵有人關注嘅盤
+    liquidity_log: 3.0   # log10(流動性)。獎勵賠率可信嘅盤
+    near_50_bonus: 6.0   # 賠率接近 50/50 = 真係唔確定 = 更有討論價值
+    resolution_soon: 4.0 # 快到期嘅獎勵（緊張感）
+
+  # 1 小時異動要有 24 小時佐證先計分。
+  # 冇佐證（1h 大郁但 24h 平靜）= 即時噪音，唔算真訊號。
+  move_1h_needs_corroboration: true
+  move_1h_corroboration_ratio: 0.35   # |Δ24h| 至少要有 |Δ1h| 嘅 35%
+
+  # 主題加分：令你個論點嗰幾類企得穩。
+  # ⚠️ 2026-08-19 實測：按 24h 成交額排嘅頭 100 名，體育同加密佔晒。
+  #    政治／地緣／宏觀嘅成交額細，唔加分就永遠排唔上。
+  #    而且文獻顯示政治校準斜率 1.31（最有嘢好講），加密 1.05（接近有效）。
+  category_bonus:
+    geopolitics: 22.0
+    politics: 20.0
+    macro: 16.0
+    tech: 6.0
+    crypto: 0.0
+    other: 2.0
+
+  # 類別多樣性：同一個 category 每 rolling 24 小時最多出幾多篇
+  # 防止 15 篇全部係加密貨幣
+  max_per_category_24h: 3
+  # 同一個「家族」（同一條問題唔同 deadline）24 小時最多
+  max_per_event_24h: 2
+
+  # 同一個真實世界當事人 24 小時最多
+  # ⚠️ 2026-08-19 實測第四輪：家族去重之後，頭 10 名仍然有 7 個講伊朗
+  #    （停火 ×2、荷姆茲通航、伊朗-阿曼協議、封鎖 ×2）。家族鍵各自唔同，
+  #    所以要多呢一層。冇佢，大新聞爆發嗰幾日你會變成單一議題帳號。
+  max_per_subject_24h: 3
+
+content:
+  target_words_en: 200
+  target_words_zh: 200          # 中文以字計
+  # 中文用繁體定簡體：traditional / simplified
+  chinese_variant: traditional
+  # 中文語域：written（書面語，正式中文）/ cantonese（廣東話口語）
+  # 一律用 written —— 廣東話口語受眾遠細過書面語，而書面語同時覆蓋
+  # 港、台、星馬同海外華人讀者。
+  chinese_register: written
+  # 廣東話口語標記：出現喺生成內容度就打回重寫（見 guard.py）
+  #
+  # ⚠️ 只用「喺書面中文冇合法用法」嘅字，或者用詞組。
+  #    唔可以單字比對 係（關係、係數）、仲（仲裁）、邊（邊界、周邊）、
+  #    點（觀點、重點）、幾（幾乎）—— 會誤殺正常書面語。
+  cantonese_markers:
+    # 單字：書面中文完全冇呢啲
+    - "嘅"
+    - "唔"
+    - "冇"
+    - "咗"
+    - "喺"
+    - "嘢"
+    - "嗰"
+    - "㗎"
+    - "喎"
+    - "嘞"
+    - "睇"
+    - "攞"
+    # 詞組：避開合法複合詞
+    - "就係"
+    - "都係"
+    - "先係"
+    - "而係"
+    - "係咁"
+    - "梗係"
+    - "淨係"
+    - "而家"
+    - "依家"
+    - "點解"
+    - "點樣"
+    - "邊個"
+    - "邊度"
+    - "幾時"
+    - "同埋"
+    - "仲有"
+    - "好似"
+    - "咁樣"
+    - "自己友"
+    - "乜嘢"
+    - "一齊"
+  # 中文貼文出唔出：main（同英文一齊）/ reply（英文帖下自回覆）/ off
+  chinese_mode: reply
+
+posting:
+  platform: x
+  # 每日最多發幾多篇（安全掣，防止 bug 造成洗版）
+  #
+  # ⚠️⚠️ 預設 3，唔係 15。呢個係刻意嘅，唔好一開波就改。
+  #
+  # X 有「冷啟動抑制」機制：新帳號嘅**頭約 100 篇**係評估窗口，
+  # 如果呢批貼文互動率太低，帳號會被長期限流到正常分發嘅一小部分，
+  # 而且要極高互動先翻得到身。
+  #
+  # 每日 15 篇 = 唔夠 7 日就燒晒個評估窗口，而且係喺你零追蹤者、
+  # 零互動歷史嘅最差時機燒。每日 3 篇 = 100 篇要一個月以上，
+  # 期間你已經累積咗真實受眾。
+  #
+  # 升法見 SETUP.md「頭 7 日」：3 → 5 → 8 → 12 → 15，
+  # 每級要睇住互動率冇跌先好升。
+  max_posts_per_day: 3
+  # 兩篇之間最少相隔幾多分鐘
+  min_minutes_between_posts: 45
+  # 貼文入面絕對唔放連結（X API 含 URL 每篇 $0.20 vs 純文字 $0.015）
+  allow_links_in_posts: false
+
+compliance:
+  # 強制附加喺每篇末尾
+  disclaimer_en: "Data & analysis only. Not advice. Not a solicitation."
+  disclaimer_zh: "純數據分析，不構成任何建議或招攬。"
+
+  # ── 第一層：硬拒絕 ─────────────────────────────────────────
+  # 出現任何一個 = 草稿即刻打回重寫，唔會送去審批。
+  # 呢啲全部係「勸人做嘢」嘅句式，冇任何合法嘅描述性用法。
+  # 法律依據見 docs/監管紅線.md（FSMA s.21 財務推廣）
+  hard_reject:
+    en:
+      - "you should"
+      - "you can profit"
+      - "i recommend"
+      - "we recommend"
+      - "my recommendation"
+      - "i'd suggest"
+      - "worth a punt"
+      - "worth backing"
+      - "good value"
+      - "value bet"
+      - "free money"
+      - "easy money"
+      - "guaranteed"
+      - "sure thing"
+      - "can't lose"
+      - "cannot lose"
+      - "no-brainer"
+      - "entry point"
+      - "target price"
+      - "price target"
+      - "get in before"
+      - "act now"
+      - "don't miss"
+      - "sign up"
+      - "referral"
+      - "use my link"
+      - "my link"
+      - "join polymarket"
+      - "trade this"
+      - "bet on this"
+      - "place a bet"
+      - "i'm long"
+      - "i'm short"
+      - "i am long"
+      - "i am short"
+      - "dyor"
+      - "nfa"
+    zh:
+      - "建議"
+      - "推薦"
+      - "值博"
+      - "抵買"
+      - "抵注"
+      - "抵博"
+      - "入場"
+      - "離場"
+      - "落注"
+      - "下注"
+      - "買入"
+      - "賣出"
+      - "沽出"
+      - "睇好"
+      - "睇淡"
+      - "跟單"
+      - "穩賺"
+      - "必賺"
+      - "必贏"
+      - "無得輸"
+      - "唔會輸"
+      - "執平貨"
+      - "機不可失"
+      - "把握機會"
+      - "註冊"
+      - "推薦碼"
+      - "邀請連結"
+      - "跟我"
+
+  # ── 第一層之二：正則式硬拒絕 ────────────────────────────
+  # 用嚟捕捉「對一個具體標的落判斷」嘅句式。
+  #
+  # 點解要分開：對一個「類別」嘅統計陳述係研究，對「呢個市場」
+  # 嘅指稱先係接近建議。
+  #   ✅ "political longshots are systematically overpriced"（類別，文獻發現）
+  #   ❌ "this market is overpriced"（具體標的，等同建議）
+  # 所以 overpriced / 高估 呢類字唔再硬禁，改為只禁「指示代詞 + 判斷」句式。
+  hard_reject_patterns:
+    - "(?i)\\bthis (market|contract|one|line|price) is (over|under)(priced|valued)\\b"
+    - "(?i)\\b(it|this) (is|looks|seems) (too )?(cheap|expensive|rich)\\b"
+    - "(?i)\\b(this|that) (is|looks like) (a|an) (steal|bargain|gift|freebie)\\b"
+    - "(?i)\\bfair value (is|should be|sits at)\\b"
+    - "(?i)\\bshould be (trading|priced) (at|around|near)\\b"
+    - "(?i)\\b(i|we) (would|will|plan to|intend to) (take|add|open|enter)\\b"
+    - "呢個市場.{0,6}(高估|低估|錯價)"
+    - "呢個(價|盤|價位).{0,6}(高估|低估|錯價|太平|太貴)"
+    - "(合理價|公允價).{0,4}(應該|係)"
+
+  # ── 第二層：標記待人手留意 ──────────────────────────────
+  # 呢啲字有合法嘅描述用法（"selling pressure"、"買盤"、
+  # 「文獻發現冷門被高估」），唔自動拒絕，但會喺 Telegram
+  # 審批訊息度標出嚟叫你睇清楚上下文。
+  flag_for_review:
+    en:
+      - "buy"
+      - "sell"
+      - "long "
+      - "short "
+      - "position"
+      - "profit"
+      - "undervalued"
+      - "overvalued"
+      - "mispriced"
+      - "cheap"
+      - "expensive"
+      - "opportunity"
+    zh:
+      - "低估"
+      - "高估"
+      - "錯價"
+      - "便宜"
+      - "貴"
+      - "機會"
+      - "倉位"
+      - "利潤"
+
+  # 掃描時跳過含呢啲字串嘅行（免責聲明本身含「建議」）
+  exempt_lines_containing:
+    - "不構成任何建議或招攬"
+    - "Not advice. Not a solicitation."
+
+  # 硬性結構要求
+  require_disclaimer: true
+  max_chars_per_post: 4000      # X Premium 長貼文上限遠高於此，留安全邊際
+  forbid_urls: true             # 貼文含 URL 每篇 $0.20 vs 純文字 $0.015
+
+telegram:
+  # 一次過最多送幾多個待審項目落 Telegram
+  max_pending_notify: 10
