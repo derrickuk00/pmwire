@@ -149,35 +149,67 @@ def normalise(m: dict) -> dict | None:
     }
 
 
-def fetch_prices_by_condition(condition_ids: list[str],
-                              batch: int = 40) -> dict[str, float]:
-    """按 condition_id 直接查現價。回傳 {condition_id: yes_price}。
+def fetch_states_by_condition(condition_ids: list[str],
+                              batch: int = 40) -> dict[str, dict]:
+    """按 condition_id 查現況。回傳 {cid: {yes_price, closed, outcome}}。
 
-    ⚠️ 帳本 mark-to-market 一定要用呢個，唔可以靠 fetch_markets()
-       嘅「成交額頭 N 名」——冷門持倉會跌出榜，配唔到就會做成
-       系統性偏差（2026-08-20 實測：80 個持倉配唔到 48 個）。
+    ⚠️ 三個一齊搞掂嘅陷阱（2026-08-20 實測：48/48 全部攞唔到）：
+
+      1. Gamma `/markets` 預設 `closed=false` —— 已結算嘅持倉
+         唔會回，所以要分兩趟（開市 + 已結算）。
+      2. `normalise()` 會剔走價格 0 或 1 嘅市場（當佢定局），
+         但帳本正正需要嗰啲 —— 所以呢度唔用 normalise，直接抽價。
+      3. 已結算嘅唔應該只係「查唔到價」，而應該自動入帳。
+         回傳 outcome 畀 ledger 自動 settle。
     """
-    out: dict[str, float] = {}
+    out: dict[str, dict] = {}
     ids = [c for c in condition_ids if c]
-    for i in range(0, len(ids), batch):
-        chunk = ids[i:i + batch]
-        try:
-            r = requests.get(f"{GAMMA}/markets", headers=UA, timeout=TIMEOUT,
-                             params=[("condition_ids", c) for c in chunk]
-                                    + [("limit", len(chunk))])
-            r.raise_for_status()
-            data = r.json()
-        except (requests.RequestException, json.JSONDecodeError) as e:
-            log(f"WARN 逐個查價失敗（{i//batch + 1} 批）：{e}")
-            continue
-        if not isinstance(data, list):
-            continue
-        for m in data:
-            n = normalise(m)
-            if n and n["yes_price"] > 0:
-                out[n["condition_id"]] = n["yes_price"]
-    if ids:
-        log(f"  直接查價：{len(out)}/{len(ids)} 個攞到")
+    if not ids:
+        return out
+
+    def absorb(m: dict) -> None:
+        cid = str(m.get("conditionId") or m.get("condition_id") or "")
+        if not cid:
+            return
+        outs = _as_list(m.get("outcomes"))
+        prices = [_as_float(p, -1.0) for p in _as_list(m.get("outcomePrices"))]
+        if len(outs) != 2 or len(prices) != 2 or any(p < 0 for p in prices):
+            return
+        yes_i = 0
+        for i, o in enumerate(outs):
+            if isinstance(o, str) and o.strip().lower() == "yes":
+                yes_i = i
+                break
+        yp = prices[yes_i]
+        closed = bool(m.get("closed"))
+        outcome = ""
+        if closed or yp >= 0.999 or yp <= 0.001:
+            outcome = "YES" if yp >= 0.5 else "NO"
+        out[cid] = {"yes_price": yp, "closed": closed, "outcome": outcome}
+
+    for closed_flag in ("false", "true"):
+        remaining = [c for c in ids if c not in out]
+        if not remaining:
+            break
+        for i in range(0, len(remaining), batch):
+            chunk = remaining[i:i + batch]
+            try:
+                r = requests.get(f"{GAMMA}/markets", headers=UA, timeout=TIMEOUT,
+                                 params=[("condition_ids", c) for c in chunk]
+                                        + [("limit", len(chunk)),
+                                           ("closed", closed_flag)])
+                r.raise_for_status()
+                data = r.json()
+            except (requests.RequestException, json.JSONDecodeError) as e:
+                log(f"WARN 查價失敗（closed={closed_flag} 第 {i//batch + 1} 批）：{e}")
+                continue
+            if isinstance(data, list):
+                for m in data:
+                    absorb(m)
+
+    n_closed = sum(1 for v in out.values() if v["outcome"])
+    log(f"  直接查價：{len(out)}/{len(ids)} 個攞到"
+        + (f"，其中 {n_closed} 個已結算" if n_closed else ""))
     return out
 
 

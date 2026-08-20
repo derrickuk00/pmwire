@@ -133,14 +133,29 @@ def mark_to_market(markets: list[dict] | None = None) -> dict:
             price[cid] = p
 
     need = [r["market_id"] for r in pending if r["market_id"] not in price]
+    states: dict[str, dict] = {}
     if need:
         log(f"📒 有 {len(need)} 個持倉唔喺今日掃描範圍，直接逐個查價…")
-        price.update(_fetch.fetch_prices_by_condition(need))
+        states = _fetch.fetch_states_by_condition(need)
 
     today = utcnow().date().isoformat()
-    marked = missing = 0
+    marked = missing = settled = 0
     for r in pending:
-        p = price.get(r["market_id"])
+        mid = r["market_id"]
+        st = states.get(mid)
+
+        # 已結算 → 自動入帳，唔使等人手 settle
+        if st and st.get("outcome"):
+            e = _f(r["entry_p"])
+            r["status"] = "settled"
+            r["outcome"] = st["outcome"]
+            r["pnl"] = f"{(1 - e) if st['outcome'] == 'YES' else -e:.4f}"
+            r["current_p"] = "1.0000" if st["outcome"] == "YES" else "0.0000"
+            r["marked_at"] = today
+            settled += 1
+            continue
+
+        p = price.get(mid) or (st or {}).get("yes_price")
         if p is None or p <= 0:
             missing += 1
             continue
@@ -148,11 +163,12 @@ def mark_to_market(markets: list[dict] | None = None) -> dict:
         r["marked_at"] = today
         marked += 1
 
-    if marked:
+    if marked or settled:
         _write_all(rows)
     log(f"📒 mark-to-market：更新 {marked}/{len(pending)} 個"
-        + (f"，{missing} 個查唔到（可能已結算或下架）" if missing else ""))
-    return {"marked": marked, "missing": missing}
+        + (f"，自動結算 {settled} 個" if settled else "")
+        + (f"，{missing} 個查唔到（可能已下架）" if missing else ""))
+    return {"marked": marked, "missing": missing, "settled": settled}
 
 
 def settle(market_id: str, outcome: str) -> bool:

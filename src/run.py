@@ -322,6 +322,8 @@ def cmd_scan() -> int:
         log(f"  掃描 {rep['n_boards']} 個盤面")
         log(f"  Σask 中位數 {rep['median_ask']}　（最低 {rep['min_ask']}）")
         log(f"  Σbid 中位數 {rep['median_bid']}　（最高 {rep['max_bid']}）")
+        log(f"  每腳超額中位數 {rep['median_per_leg']*100:.2f} 仙"
+            f"　（盤面中位數 {rep['median_legs']} 腳）　← 呢個先係可比指標")
         log(f"  違規：{rep['n_violations']} 個")
         for v in rep["violations"][:5]:
             log(f"    · {v['kind']}  Σask={v['sum_ask']:.4f} Σbid={v['sum_bid']:.4f}"

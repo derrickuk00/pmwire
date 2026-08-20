@@ -222,6 +222,14 @@ def board_report(scored: list[dict], ask_floor: float = 1.00,
 
     asks = [b["sum_ask"] for b in scored]
     bids = [b["sum_bid"] for b in scored]
+    # ⚠️ 每腳超額先係跨盤面可比嘅指標。
+    #    Σask 天然隨腳數上升：3 腳盤每腳 1 仙價差 → 1.03；
+    #    20 腳選舉盤每腳 3 仙 → 1.6。兩個都唔算「無效率」。
+    #    2026-08-20 實測：剔走體育（多數 3 腳）之後，Σask 中位數
+    #    由 1.051 跳到 1.131 —— 唔係市場變差，係盤面組合變咗。
+    #    所以錨定貼應該報每腳超額，Σask 只做輔助。
+    per_leg = [(b["sum_ask"] - 1.0) / max(b["n_legs"], 1) for b in scored]
+    legs = [b["n_legs"] for b in scored]
     viol = []
     for b in scored:
         if b["min_depth"] < min_depth_usd:
@@ -235,6 +243,8 @@ def board_report(scored: list[dict], ask_floor: float = 1.00,
         "n_boards": len(scored),
         "median_ask": round(statistics.median(asks), 4),
         "median_bid": round(statistics.median(bids), 4),
+        "median_per_leg": round(statistics.median(per_leg), 5),
+        "median_legs": int(statistics.median(legs)),
         "min_ask": round(min(asks), 4),
         "max_bid": round(max(bids), 4),
         "violations": viol,
