@@ -96,6 +96,18 @@ selection:
   #    所以要多呢一層。冇佢，大新聞爆發嗰幾日你會變成單一議題帳號。
   max_per_subject_24h: 3
 
+basket:
+  # 政治冷門籃子（scans.basket_candidates + ledger）
+  price_lo: 0.10
+  price_hi: 0.35
+  min_volume_total: 100000
+
+  # ⚠️ 每日最多入籃幾多個。2026-08-20 實測一次過加咗 32 個 ——
+  #    照咁落去 100 日就係三千幾筆，變成拖網而唔係受控實驗。
+  #    你原本嘅 v4 五個星期先累積 51 筆，嗰個係啱嘅節奏。
+  #    超額嘅會按成交額排序，只留最大嗰批。
+  max_new_per_day: 6
+
 content:
   # ── 用邊個 LLM ──────────────────────────────────────────
   # openai 或 claude。100 日全程成本差距最多約 US$22，

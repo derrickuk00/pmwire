@@ -343,7 +343,11 @@ def cmd_scan() -> int:
 
     # ── A：政治冷門籃子（basket 貼）──
     log("\n── A  政治冷門籃子 ──")
-    cands = scans.basket_candidates(markets)
+    bc = cfg.get("basket", {})
+    cands = scans.basket_candidates(
+        markets, lo=bc.get("price_lo", 0.10), hi=bc.get("price_hi", 0.35),
+        min_volume_total=bc.get("min_volume_total", 100_000),
+        max_new=bc.get("max_new_per_day", 6))
     log(f"  符合條件嘅市場：{len(cands)} 個")
     added = ledger.add_candidates(cands)
     mtm = ledger.mark_to_market(markets)
@@ -351,6 +355,7 @@ def cmd_scan() -> int:
     log(f"  帳本：{st['total']} 筆　未結算 {st['pending']}　已結算 {st['settled']}"
         + (f"（YES {st['settled_yes']} / NO {st['settled_no']}）" if st["settled"] else ""))
     if st["mean_entry"] is not None:
+        log(f"  今日 mark 到 {st['marked_today']}/{st['pending']} 筆")
         log(f"  籃內均價：入場 {st['mean_entry']:.4f} → 今日 {st['mean_current']:.4f}"
             + (f"　漂移 {st['drift_pts']:+.1f}pt" if st["drift_pts"] is not None else ""))
     if st["roi_pct"] is not None:

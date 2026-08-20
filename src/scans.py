@@ -76,6 +76,14 @@ def fetch_negrisk_boards(pages: int = 8, per_page: int = 100,
         for ev in batch:
             if not ev.get("negRisk"):
                 continue
+            # ⚠️ 剔走體育。2026-08-20 實測：唯一「違規」係一場足球賽
+            #    （OFI vs PFK CSKA Sofia，深度得 $23）。單場賽事盤口
+            #    又薄又多，會拉歪 Σask 中位數 —— 實測含體育 1.051，
+            #    而 v4 唔含體育係 1.02。要同你嘅內容主題一致。
+            import classify as _cl
+            title_cat = _cl.classify(ev.get("title") or "")
+            if title_cat in ("sports", "weather", "culture"):
+                continue
             eid = str(ev.get("id", ""))
             if eid in seen:
                 continue
@@ -199,11 +207,14 @@ def score_boards(boards: list[dict], min_depth_usd: float = 20.0) -> list[dict]:
 
 
 def board_report(scored: list[dict], ask_floor: float = 1.00,
-                 bid_ceiling: float = 1.00, min_depth_usd: float = 20.0) -> dict:
+                 bid_ceiling: float = 1.00, min_depth_usd: float = 250.0) -> dict:
     """彙總成一篇 anchor 貼所需嘅數字。
 
     Σask < 1.00 或 Σbid > 1.00 = 內部矛盾。
     但要求最小深度 —— 紙面矛盾而只得幾蚊掛住，唔算真矛盾，只係空。
+
+    ⚠️ 門檻由 $20 提高到 $250。2026-08-20 實測，$20 會放行一個
+       深度得 $23 嘅「違規」—— 嗰個係噪音唔係訊號。
     """
     if not scored:
         return {"n_boards": 0, "median_ask": None, "median_bid": None,
@@ -309,7 +320,8 @@ BASKET_CATEGORIES = {"politics", "geopolitics"}
 
 
 def basket_candidates(markets: list[dict], lo: float = 0.10, hi: float = 0.35,
-                      min_volume_total: float = 100_000.0) -> list[dict]:
+                      min_volume_total: float = 100_000.0,
+                      max_new: int | None = None) -> list[dict]:
     """符合籃子條件嘅市場。
 
     政治／地緣 + 價格 0.10–0.35 + 累計成交額 ≥ 10 萬。
@@ -327,4 +339,11 @@ def basket_candidates(markets: list[dict], lo: float = 0.10, hi: float = 0.35,
         if m.get("volume_total", 0) < min_volume_total:
             continue
         out.append(m)
+
+    # 每日入籃上限：超額就按累計成交額排序，只留最大嗰批。
+    # 冇呢個上限，籃子會變成拖網而唔係受控實驗。
+    out.sort(key=lambda m: -m.get("volume_total", 0))
+    if max_new is not None and len(out) > max_new:
+        log(f"籃子候選 {len(out)} 個，按每日上限只取成交額最大嘅 {max_new} 個")
+        out = out[:max_new]
     return out

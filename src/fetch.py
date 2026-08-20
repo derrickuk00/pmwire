@@ -149,6 +149,38 @@ def normalise(m: dict) -> dict | None:
     }
 
 
+def fetch_prices_by_condition(condition_ids: list[str],
+                              batch: int = 40) -> dict[str, float]:
+    """按 condition_id 直接查現價。回傳 {condition_id: yes_price}。
+
+    ⚠️ 帳本 mark-to-market 一定要用呢個，唔可以靠 fetch_markets()
+       嘅「成交額頭 N 名」——冷門持倉會跌出榜，配唔到就會做成
+       系統性偏差（2026-08-20 實測：80 個持倉配唔到 48 個）。
+    """
+    out: dict[str, float] = {}
+    ids = [c for c in condition_ids if c]
+    for i in range(0, len(ids), batch):
+        chunk = ids[i:i + batch]
+        try:
+            r = requests.get(f"{GAMMA}/markets", headers=UA, timeout=TIMEOUT,
+                             params=[("condition_ids", c) for c in chunk]
+                                    + [("limit", len(chunk))])
+            r.raise_for_status()
+            data = r.json()
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            log(f"WARN 逐個查價失敗（{i//batch + 1} 批）：{e}")
+            continue
+        if not isinstance(data, list):
+            continue
+        for m in data:
+            n = normalise(m)
+            if n and n["yes_price"] > 0:
+                out[n["condition_id"]] = n["yes_price"]
+    if ids:
+        log(f"  直接查價：{len(out)}/{len(ids)} 個攞到")
+    return out
+
+
 def fetch_normalised() -> list[dict]:
     raw = fetch_markets()
     out = []

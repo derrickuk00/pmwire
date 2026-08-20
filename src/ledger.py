@@ -103,21 +103,43 @@ def add_candidates(markets: list[dict]) -> list[dict]:
     return added
 
 
-def mark_to_market(markets: list[dict]) -> dict:
+def mark_to_market(markets: list[dict] | None = None) -> dict:
     """用今日嘅價更新所有未結算條目。
 
     ⚠️ 冇呢一步，你 100 日內學唔到任何嘢 ——
        政治市場幾個月先結算，期間帳本會完全靜止。
-       有咗佢，你每日都報告得到「籃內均價由 0.22 跌到 0.19」。
-    """
-    rows = read_all()
-    price = {str(m.get("condition_id")): _f(m.get("yes_price")) for m in markets}
-    today = utcnow().date().isoformat()
 
+    ⚠️ 一定要逐個 condition_id 直接查價，唔可以靠「成交額頭 1200 名」
+       嘅大掃描去配對。2026-08-20 實測：80 個持倉入面 48 個配唔到，
+       因為佢哋已經跌出前 1200 名。咁樣算出嚟嘅「籃內均價」
+       只反映仲活躍嗰批 —— 有系統性偏差，數字冇意義。
+       （籃子嘅重點正正係「冷門會點樣衰落」，剔走冷門就冇得研究。）
+
+    傳入 markets 只作為快取；查唔到嘅一律走 API 直接攞。
+    """
+    import fetch as _fetch
+
+    rows = read_all()
+    pending = [r for r in rows if r.get("status") == "pending"]
+    if not pending:
+        log("📒 帳本冇未結算條目")
+        return {"marked": 0, "missing": 0}
+
+    price: dict[str, float] = {}
+    for m in (markets or []):
+        cid = str(m.get("condition_id") or "")
+        p = _f(m.get("yes_price"))
+        if cid and p > 0:
+            price[cid] = p
+
+    need = [r["market_id"] for r in pending if r["market_id"] not in price]
+    if need:
+        log(f"📒 有 {len(need)} 個持倉唔喺今日掃描範圍，直接逐個查價…")
+        price.update(_fetch.fetch_prices_by_condition(need))
+
+    today = utcnow().date().isoformat()
     marked = missing = 0
-    for r in rows:
-        if r.get("status") != "pending":
-            continue
+    for r in pending:
         p = price.get(r["market_id"])
         if p is None or p <= 0:
             missing += 1
@@ -128,8 +150,8 @@ def mark_to_market(markets: list[dict]) -> dict:
 
     if marked:
         _write_all(rows)
-    log(f"📒 mark-to-market：更新 {marked} 個"
-        + (f"，{missing} 個今日抓唔到報價" if missing else ""))
+    log(f"📒 mark-to-market：更新 {marked}/{len(pending)} 個"
+        + (f"，{missing} 個查唔到（可能已結算或下架）" if missing else ""))
     return {"marked": marked, "missing": missing}
 
 
@@ -161,8 +183,15 @@ def stats() -> dict:
     pend = [r for r in rows if r.get("status") == "pending"]
     sett = [r for r in rows if r.get("status") == "settled"]
 
-    entry = [_f(r["entry_p"]) for r in pend if _f(r["entry_p"]) > 0]
-    cur = [_f(r["current_p"]) for r in pend if _f(r["current_p"]) > 0]
+    # ⚠️ 逐行配對，唔可以分別取平均再相減 ——
+    #    有啲行 mark 到有啲冇，兩條 list 長度唔同就會算錯。
+    #    只計今日真係 mark 到嘅行。
+    today = utcnow().date().isoformat()
+    pairs = [(_f(r["entry_p"]), _f(r["current_p"])) for r in pend
+             if _f(r["entry_p"]) > 0 and _f(r["current_p"]) > 0
+             and r.get("marked_at") == today]
+    entry = [a for a, _ in pairs]
+    cur = [b for _, b in pairs]
     yes = sum(1 for r in sett if r.get("outcome") == "YES")
     no = sum(1 for r in sett if r.get("outcome") == "NO")
     pnl = sum(_f(r["pnl"]) for r in sett)
@@ -175,10 +204,11 @@ def stats() -> dict:
         "settled_no": no,
         "pnl_units": round(pnl, 4),
         "roi_pct": round(100 * pnl / len(sett), 1) if sett else None,
+        "marked_today": len(pairs),
         "mean_entry": round(sum(entry) / len(entry), 4) if entry else None,
         "mean_current": round(sum(cur) / len(cur), 4) if cur else None,
-        "drift_pts": round(100 * (sum(cur) / len(cur) - sum(entry) / len(entry)), 1)
-                     if entry and cur and len(entry) == len(cur) else None,
+        "drift_pts": round(100 * sum(b - a for a, b in pairs) / len(pairs), 1)
+                     if pairs else None,
         "last_marked": max((r.get("marked_at", "") for r in pend), default=""),
     }
 
