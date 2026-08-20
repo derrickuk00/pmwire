@@ -3,6 +3,7 @@
   python src/run.py draft     抓數據 → 選題 → 生成 → 守門 → 送去 Telegram 審批
   python src/run.py publish   讀取審批決定 → 發布已批准嘅 → 更新狀態
   python src/run.py doctor    自檢：憑證、設定、狀態檔
+  python src/run.py testpost  真發一篇測試貼再自動刪 —— 唯一可靠嘅寫入測試
 
 環境變數（全部由 GitHub Secrets 注入）：
   OPENAI_API_KEY        內容生成
@@ -267,8 +268,18 @@ def cmd_doctor() -> int:
         ok = False
 
     log("--- X 憑證 ---")
+    shape_problems = post_x.shape_check()
+    for pr in shape_problems:
+        log(f"  ⚠ {pr}")
     if not post_x.verify_credentials(dry_run=DRY):
         ok = False
+        if not shape_problems:
+            log("  格式檢查冇發現異常，但 v1.1 明確回 401 —— "
+                "四個值其中一個貼錯咗另一個欄位嘅內容。")
+        log("  修法：X Developer Portal → Keys and tokens →")
+        log("    1) Regenerate Consumer Key（連 Secret 一齊即刻抄低）")
+        log("    2) 然後先 Regenerate Access Token（順序倒轉要重做）")
+        log("    3) 確認新 Access Token 顯示 Read and write")
 
     log("--- Telegram ---")
     try:
@@ -297,6 +308,17 @@ def cmd_digest() -> int:
     return 0
 
 
+def cmd_testpost() -> int:
+    """真發一篇極短貼文再即刻刪返 —— 唯一可靠嘅寫入權限測試。"""
+    if DRY:
+        log("DRY_RUN 開緊，testpost 冇意義。除咗 DRY_RUN 再跑。")
+        return 1
+    log("=== X 寫入權限測試 ===")
+    for pr in post_x.shape_check():
+        log(f"  ⚠ {pr}")
+    return 0 if post_x.test_roundtrip() else 1
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if DRY:
@@ -309,6 +331,8 @@ def main() -> int:
         return cmd_digest()
     if mode == "doctor":
         return cmd_doctor()
+    if mode == "testpost":
+        return cmd_testpost()
     print(__doc__)
     return 2
 

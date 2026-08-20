@@ -1,0 +1,26 @@
+# 真發一篇極短貼文，成功之後即刻自動刪返。
+# 呢個係唯一可靠嘅 X 寫入權限測試 —— 因為冇任何唯讀端點
+# 同時支援 OAuth 1.0a 又驗到寫入權限。
+name: testpost
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testpost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 測試發文 + 自動刪除
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+        run: python src/run.py testpost
