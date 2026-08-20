@@ -94,6 +94,18 @@ fi
 
 git add -A
 git commit -q -m "$MSG"
+
+# ⚠️ push 之前先 rebase。GitHub Actions 嘅 scan workflow 每日會喺雲端
+#    commit 帳本（mark-to-market），本機唔 pull 就 push 一定撞。
+#    （2026-08-20 實測：07:20 UTC 個 scan 跑咗之後，本機 push 被拒。）
+say "同步 remote…"
+git pull --rebase --autostash -q || die "rebase 失敗 —— 跑 git status 睇下邊個檔案衝突"
+
 say "推送中…"
-git push -q
-say "完成 —— $(git rev-parse --short HEAD)"
+for i in 1 2 3; do
+  if git push -q; then say "完成 —— $(git rev-parse --short HEAD)"; exit 0; fi
+  warn "推送失敗，第 $i 次重試…"
+  git pull --rebase --autostash -q || true
+  sleep 2
+done
+die "推送失敗 3 次"
