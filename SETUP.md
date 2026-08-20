@@ -37,11 +37,29 @@ GitHub 由 2021 年起唔收密碼，要用 Personal Access Token：
 
 1. GitHub → 右上頭像 → Settings → Developer settings →
    Personal access tokens → **Tokens (classic)** → Generate new token
-2. Note 隨便填，Expiration 揀 90 days，**勾 `repo` 呢個 scope**
-3. Generate，抄低（**只顯示一次**）
-4. `git push` 問 Username 就打你 GitHub 用戶名，問 Password 就貼**個 token**
+2. Note 隨便填，Expiration 揀 90 days
+3. ⚠️ **兩個 scope 都要勾：`repo` 同 `workflow`**
+   - 淨係勾 `repo` 會推到普通檔案，但一撞到 `.github/workflows/`
+     就會被拒：*"refusing to allow a Personal Access Token to create or
+     update workflow ... without `workflow` scope"*
+   - Classic token 事後可以直接加 scope 而 token 值唔變 ——
+     撳返個 token 名入去勾多個 `workflow`，撳 Update token 就得，
+     唔使重新認證
+4. Generate，抄低（**只顯示一次**）
+5. `git push` 問 Username 就打你 GitHub 用戶名，問 Password 就貼**個 token**
 
-或者裝 GitHub CLI，一次過搞掂：`brew install gh && gh auth login`
+或者裝 GitHub CLI，一次過搞掂（佢會自己攞齊 scope）：
+`brew install gh && gh auth login`
+
+### 如果 push 話 `denied to <另一個帳號名>`
+
+macOS 鑰匙圈快取咗第二個 GitHub 帳號嘅憑證。清走再推：
+
+```bash
+printf "protocol=https\nhost=github.com\n\n" | git credential-osxkeychain erase
+git remote set-url origin https://<你嘅用戶名>@github.com/<你嘅用戶名>/pmwire.git
+git push -u origin main
+```
 
 ## 步驟 1 — Telegram 機械人（5 分鐘）
 
@@ -82,11 +100,26 @@ GitHub 由 2021 年起唔收密碼，要用 Personal Access Token：
 
 ---
 
-## 步驟 3 — OpenAI API key（5 分鐘）
+## 步驟 3 — LLM API key（5 分鐘）
 
-1. [platform.openai.com](https://platform.openai.com) → API keys → 建立新 key
-2. 入 Billing 充值（$10 已經夠用好耐 —— 見下面成本表）
-3. 抄低個 key → `OPENAI_API_KEY`
+**OpenAI 定 Claude？100 日全程成本差距最多約 US$22**，所以唔應該用價錢決定。
+用你自己嘅真數據試一次：
+
+```bash
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... \
+  python tools/dryrun.py --compare
+```
+
+同一個市場，兩邊各生成一次，並排印出嚟，連埋守門同發現度結果。
+睇兩樣：**要重寫幾多次先過到關**（重寫多 = 唔聽負面指令 = 貴又慢），
+同埋**中文係咪真書面語**。揀完改 `config.yaml` 嘅 `content.llm_provider`。
+
+- OpenAI：[platform.openai.com](https://platform.openai.com) → API keys
+  → 建立 → 入 Billing 充值 → `OPENAI_API_KEY`
+- Claude：[platform.claude.com](https://platform.claude.com) → API keys
+  → 建立 → 入 Billing 充值 → `ANTHROPIC_API_KEY`
+
+$10 已經夠用好耐（1,500 篇約 $2–24，睇型號）。
 
 ---
 
@@ -98,7 +131,8 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **New re
 
 | 名（要一模一樣） | 來源 |
 |---|---|
-| `OPENAI_API_KEY` | 步驟 3 |
+| `OPENAI_API_KEY` | 步驟 3（用 OpenAI 嘅話）|
+| `ANTHROPIC_API_KEY` | 步驟 3（用 Claude 嘅話）|
 | `TELEGRAM_BOT_TOKEN` | 步驟 1 @BotFather |
 | `TELEGRAM_CHAT_ID` | 步驟 1 @userinfobot |
 | `X_API_KEY` | 步驟 2 |
@@ -106,7 +140,11 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **New re
 | `X_ACCESS_TOKEN` | 步驟 2 |
 | `X_ACCESS_SECRET` | 步驟 2 |
 
-（可選）**Variables** 分頁加 `LLM_MODEL`，值 `gpt-4o-mini`。唔加就用預設。
+兩個 LLM key **唔使兩個都貼** —— 睇你 `config.yaml` 入面
+`content.llm_provider` 設咗邊個。想做 A/B 對比就兩個都貼。
+
+（可選）**Variables** 分頁可以加 `LLM_PROVIDER`（`openai` 或 `claude`）
+同 `LLM_MODEL`，會蓋過 config。唔加就跟 config。
 
 ---
 

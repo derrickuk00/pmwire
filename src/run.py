@@ -30,7 +30,8 @@ import post_x
 import tracker
 
 DRY = os.environ.get("DRY_RUN", "").strip() in ("1", "true", "yes")
-MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+MODEL = os.environ.get("LLM_MODEL", "").strip() or None
+PROVIDER = os.environ.get("LLM_PROVIDER", "").strip() or None
 
 
 # ────────────────────────── 草稿模式 ──────────────────────────
@@ -61,7 +62,7 @@ def cmd_draft() -> int:
             break
         log(f"起草：{m['question'][:70]}")
         en, zh, res, sres = drafter.generate_compliant(
-            m, cfg, guard.check, model=MODEL,
+            m, cfg, guard.check, model=MODEL, provider=PROVIDER,
             max_attempts=3, tier="move",
         )
         if not en:
@@ -240,7 +241,11 @@ def cmd_doctor() -> int:
         log(f"✗ config.yaml 有問題：{e}")
         return 1
 
-    for name in ("OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    cfg_provider = (PROVIDER or cfg.get("content", {}).get("llm_provider", "openai")).lower()
+    need_llm_key = "ANTHROPIC_API_KEY" if cfg_provider == "claude" else "OPENAI_API_KEY"
+    log(f"內容生成供應商：{cfg_provider} → 需要 {need_llm_key}")
+
+    for name in (need_llm_key, "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                  "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"):
         if os.environ.get(name, "").strip():
             log(f"✓ {name} 已設定")

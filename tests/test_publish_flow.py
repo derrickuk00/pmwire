@@ -16,7 +16,26 @@ common.TG_OFFSET_PATH = common.STATE_DIR / "tg_offset.json"
 
 import telegram_gate as tg
 import post_x
+import tracker
 import run as runner
+
+# ⚠️ 凍結時間。
+#    唔凍結嘅話，喺 UTC 半夜之後跑會爆：測試造嘅「60 分鐘前」貼文
+#    其實落咗喺昨日，`_posts_today` 數到 0，每日上限測試就失敗。
+#    （2026-08-20 00:14 真係撞到。）
+_FROZEN = dt.datetime.now(dt.timezone.utc).replace(
+    hour=12, minute=0, second=0, microsecond=0)
+
+
+def _frozen_now():
+    return _FROZEN
+
+
+for _mod in (common, runner, tracker):
+    _mod.utcnow = _frozen_now
+import picker as _picker
+_picker.utcnow = _frozen_now
+tracker.LOG_PATH = common.STATE_DIR / "post_log.csv"
 
 FAILED = []
 def check(name, cond, detail=""):

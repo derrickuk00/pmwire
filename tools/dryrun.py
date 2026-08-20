@@ -44,7 +44,10 @@ def hr(title: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live-llm", action="store_true",
-                    help="真係叫 OpenAI 生成（需要 OPENAI_API_KEY）")
+                    help="真係叫 LLM 生成（睇 config 嘅 llm_provider）")
+    ap.add_argument("--compare", action="store_true",
+                    help="同一個市場用 OpenAI 同 Claude 各生成一次，並排比較。"
+                         "需要 OPENAI_API_KEY 同 ANTHROPIC_API_KEY 兩個都設定")
     ap.add_argument("--top", type=int, default=10, help="印幾多個候選")
     args = ap.parse_args()
 
@@ -102,6 +105,43 @@ def main() -> int:
 
     # ── 3. 生成 ──
     hr("3 / 5　內容生成")
+
+    if args.compare:
+        import draft, llm
+        print("同一個市場，兩個供應商各跑一次。")
+        print("留意兩樣嘢：① 要重寫幾多次先過到關　② 中文係咪真書面語\n")
+        results = {}
+        for prov in ("openai", "claude"):
+            key = "OPENAI_API_KEY" if prov == "openai" else "ANTHROPIC_API_KEY"
+            if not os.environ.get(key):
+                print(f"⏭  跳過 {prov} —— 冇設定 {key}\n")
+                continue
+            print("═" * 66)
+            print(f"  {llm.describe(prov, cfg['content'].get('llm_model') or None)}")
+            print("═" * 66)
+            en, zh, g, s = draft.generate_compliant(
+                top, cfg, guard.check, provider=prov, max_attempts=3, tier="move")
+            if not en:
+                print("✗ 三次都過唔到關卡\n")
+                results[prov] = None
+                continue
+            print(f"\n【英文】{len(en.split())} 字\n{en}")
+            print(f"\n【中文】{len(zh)} 字元\n{zh}")
+            print(f"\n合規 {'✅' if g.ok else '❌'}　發現度 {'✅' if s.ok else '❌'}"
+                  f"　實體：{'、'.join(s.entities) or '無'}")
+            if g.flags:
+                print(f"  ⚑ 待留意：{', '.join(g.flags)}")
+            for h in s.hints:
+                print(f"  💡 {h}")
+            print()
+            results[prov] = (en, zh, g, s)
+
+        hr("對比完成")
+        print("兩邊都睇過之後，改 config.yaml 嘅 content.llm_provider。")
+        print("我嘅立場要講明：我係 Claude，所以我推薦 Claude 有利益衝突 ——")
+        print("上面兩份稿係你自己嘅數據，用佢哋決定，唔好用我嘅意見決定。")
+        return 0
+
     if args.live_llm:
         if not os.environ.get("OPENAI_API_KEY"):
             print("❌ --live-llm 需要 OPENAI_API_KEY 環境變數")

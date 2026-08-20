@@ -97,6 +97,19 @@ selection:
   max_per_subject_24h: 3
 
 content:
+  # ── 用邊個 LLM ──────────────────────────────────────────
+  # openai 或 claude。100 日全程成本差距最多約 US$22，
+  # 所以呢個唔應該用價錢決定 —— 用 tools/dryrun.py --compare
+  # 拎你自己嘅真數據跑一次，睇邊個守規矩同中文寫得好啲。
+  #
+  # 需要對應嘅 secret：
+  #   openai → OPENAI_API_KEY
+  #   claude → ANTHROPIC_API_KEY
+  llm_provider: openai
+  # 留空 = 用 src/llm.py 嘅 DEFAULT_MODELS。
+  # ⚠️ 型號 ID 要喺供應商 console 抄實際 API 字串，唔好用營銷名。
+  llm_model: ""
+
   target_words_en: 200
   target_words_zh: 200          # 中文以字計
   # 中文用繁體定簡體：traditional / simplified

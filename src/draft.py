@@ -9,14 +9,9 @@
   4. 免責聲明由 code 附加，唔靠 LLM 記得寫。
 """
 from __future__ import annotations
-import json
+import os
 import re
-import requests
-from common import log, env
-
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-TIMEOUT = 90
-
+from common import log
 
 SYSTEM_PROMPT = """You are a markets data analyst writing short, factual notes about \
 prediction-market price movements. You write for an informed audience that wants to \
@@ -121,39 +116,29 @@ def _strip_fences(s: str) -> str:
     return s.strip()
 
 
-def generate(m: dict, cfg: dict, model: str = "gpt-4o-mini",
-             extra_instruction: str = "") -> tuple[str, str]:
-    """回傳 (english_text, chinese_text)，已附加免責聲明。"""
-    api_key = env("OPENAI_API_KEY")
+def generate(m: dict, cfg: dict, model: str | None = None,
+             extra_instruction: str = "",
+             provider: str | None = None) -> tuple[str, str]:
+    """回傳 (english_text, chinese_text)，已附加免責聲明。
+
+    供應商同型號由 config 嘅 content.llm_provider / llm_model 決定，
+    亦可以用環境變數 LLM_PROVIDER / LLM_MODEL 蓋過。
+    """
+    import llm as _llm
+
+    c = cfg.get("content", {})
+    provider = provider or os.environ.get("LLM_PROVIDER") or c.get("llm_provider", "openai")
+    model = model or os.environ.get("LLM_MODEL") or c.get("llm_model") or None
 
     user = build_user_prompt(m)
     if extra_instruction:
         user += f"\n\nADDITIONAL REQUIREMENT (a previous draft was rejected):\n{extra_instruction}"
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.5,
-        "response_format": {"type": "json_object"},
-    }
-
-    r = requests.post(
-        OPENAI_URL,
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"},
-        json=payload, timeout=TIMEOUT,
-    )
-    if r.status_code != 200:
-        raise RuntimeError(f"LLM 呼叫失敗 HTTP {r.status_code}: {r.text[:300]}")
-
-    content = r.json()["choices"][0]["message"]["content"]
     try:
-        obj = json.loads(_strip_fences(content))
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"LLM 回應唔係合法 JSON：{e}\n原文：{content[:400]}")
+        obj = _llm.complete(SYSTEM_PROMPT, user, provider=provider,
+                            model=model, temperature=0.5)
+    except _llm.LLMError as e:
+        raise RuntimeError(str(e)) from e
 
     en = (obj.get("en") or "").strip()
     zh = (obj.get("zh") or "").strip()
@@ -169,8 +154,9 @@ def generate(m: dict, cfg: dict, model: str = "gpt-4o-mini",
     return en, zh
 
 
-def generate_compliant(m: dict, cfg: dict, guard_check, model: str = "gpt-4o-mini",
-                       max_attempts: int = 3, tier: str = "move"):
+def generate_compliant(m: dict, cfg: dict, guard_check, model: str | None = None,
+                       max_attempts: int = 3, tier: str = "move",
+                       provider: str | None = None):
     """生成 → 守門 → 發現度檢查 → 唔過就帶住原因重寫。
 
     兩道關順序係有意嘅：
@@ -185,7 +171,8 @@ def generate_compliant(m: dict, cfg: dict, guard_check, model: str = "gpt-4o-min
     last_g = last_s = None
     for attempt in range(1, max_attempts + 1):
         try:
-            en, zh = generate(m, cfg, model=model, extra_instruction=extra)
+            en, zh = generate(m, cfg, model=model, extra_instruction=extra,
+                              provider=provider)
         except RuntimeError as e:
             log(f"  第 {attempt} 次生成出錯：{e}")
             if attempt == max_attempts:
