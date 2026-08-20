@@ -167,8 +167,22 @@ def fetch_states_by_condition(condition_ids: list[str],
     if not ids:
         return out
 
-    def absorb(m: dict) -> None:
+    def absorb(m: dict, want: set[str] | None = None,
+               param: str = "condition_ids") -> None:
+        # 回傳嘅結果要用返「帳本入面嗰個 key」入 out，
+        # 否則數字 id 查返嚟會用 conditionId 做 key，配唔返上去。
         cid = str(m.get("conditionId") or m.get("condition_id") or "")
+        mid = str(m.get("id") or "")
+        key = cid if param == "condition_ids" else mid
+        if want is not None and key not in want:
+            # Gamma 有時會回埋唔喺 filter 入面嘅嘢 —— 只收我哋要嗰啲
+            if cid in want:
+                key = cid
+            elif mid in want:
+                key = mid
+            else:
+                return
+        cid = key
         if not cid:
             return
         outs = _as_list(m.get("outcomes"))
@@ -187,25 +201,44 @@ def fetch_states_by_condition(condition_ids: list[str],
             outcome = "YES" if yp >= 0.5 else "NO"
         out[cid] = {"yes_price": yp, "closed": closed, "outcome": outcome}
 
-    for closed_flag in ("false", "true"):
-        remaining = [c for c in ids if c not in out]
-        if not remaining:
-            break
-        for i in range(0, len(remaining), batch):
-            chunk = remaining[i:i + batch]
-            try:
-                r = requests.get(f"{GAMMA}/markets", headers=UA, timeout=TIMEOUT,
-                                 params=[("condition_ids", c) for c in chunk]
-                                        + [("limit", len(chunk)),
-                                           ("closed", closed_flag)])
-                r.raise_for_status()
-                data = r.json()
-            except (requests.RequestException, json.JSONDecodeError) as e:
-                log(f"WARN 查價失敗（closed={closed_flag} 第 {i//batch + 1} 批）：{e}")
-                continue
-            if isinstance(data, list):
-                for m in data:
-                    absorb(m)
+    # ⚠️ 帳本入面可能撈埋兩種識別碼（2026-08-20 診斷實測，長度分佈 [6, 7, 66]）：
+    #      · 66 字元 `0x…`  = conditionId      → 用 condition_ids 查
+    #      · 6–7 位數字     = Gamma 數字 id     → 用 id 查
+    #    v4 存數字 id，pmwire 存 conditionId。兩者唔互通，
+    #    用錯參數就會靜靜回 0 項（唔會報錯）。
+    #    另外實測：`condition_id`（單數）唔係有效參數 —— Gamma 會無視佢
+    #    然後回一版預設 20 項，睇落似成功但其實完全錯。
+    def _key(cid: str) -> str:
+        return "condition_ids" if cid.startswith("0x") else "id"
+
+    groups: dict[str, list[str]] = {}
+    for c in ids:
+        groups.setdefault(_key(c), []).append(c)
+    if len(groups) > 1:
+        log("  帳本有兩種識別碼："
+            + "、".join(f"{k}×{len(v)}" for k, v in groups.items()))
+
+    for param, group in groups.items():
+        for closed_flag in ("false", "true"):
+            remaining = [c for c in group if c not in out]
+            if not remaining:
+                break
+            for i in range(0, len(remaining), batch):
+                chunk = remaining[i:i + batch]
+                try:
+                    r = requests.get(f"{GAMMA}/markets", headers=UA, timeout=TIMEOUT,
+                                     params=[(param, c) for c in chunk]
+                                            + [("limit", len(chunk)),
+                                               ("closed", closed_flag)])
+                    r.raise_for_status()
+                    data = r.json()
+                except (requests.RequestException, json.JSONDecodeError) as e:
+                    log(f"WARN 查價失敗（{param} closed={closed_flag} "
+                        f"第 {i//batch + 1} 批）：{e}")
+                    continue
+                if isinstance(data, list):
+                    for m in data:
+                        absorb(m, want=set(chunk), param=param)
 
     n_closed = sum(1 for v in out.values() if v["outcome"])
     log(f"  直接查價：{len(out)}/{len(ids)} 個攞到"
