@@ -121,6 +121,8 @@ def cmd_check(args) -> int:
         return 1
 
     en, zh = _extract(raw)
+    # 收走段落內嘅硬換行 —— 由 CLI／網頁版複製返嚟最易帶住
+    en, zh = draft.normalise_for_x(en), draft.normalise_for_x(zh)
     if not en:
         print("❌ 抽唔到英文內容")
         return 1

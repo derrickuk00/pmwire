@@ -1,0 +1,46 @@
+# 每日結構性掃描：negRisk 盤面效率、日期階梯、政治冷門籃子。
+# 呢個係內容核心 —— anchor / basket / violation 三種貼嘅數據源。
+# 同時每日 mark-to-market，令帳本唔會靜止幾個月。
+name: scan
+
+on:
+  schedule:
+    - cron: "20 7 * * *"    # UTC 07:20，錨定貼用呢個數
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pmwire-state
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 跑三個掃描
+        run: python src/run.py scan
+      - name: 儲存帳本
+        run: |
+          set -e
+          git config user.name  "pmwire-bot"
+          git config user.email "pmwire-bot@users.noreply.github.com"
+          if git diff --quiet -- state/; then
+            echo "帳本冇變"; exit 0
+          fi
+          git add state/
+          git commit -m "scan: 更新帳本同 mark-to-market [skip ci]"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            git pull --rebase --autostash || true
+            sleep $((i * 3))
+          done
+          echo "::error::推送失敗"; exit 1

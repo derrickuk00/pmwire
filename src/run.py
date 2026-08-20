@@ -4,6 +4,8 @@
   python src/run.py publish   讀取審批決定 → 發布已批准嘅 → 更新狀態
   python src/run.py doctor    自檢：憑證、設定、狀態檔
   python src/run.py testpost  真發一篇測試貼再自動刪 —— 唯一可靠嘅寫入測試
+  python src/run.py scan      跑齊三個結構性掃描（anchor / basket / violation 貼嘅數據）
+  python src/run.py settle <market_id> YES|NO   記錄一筆帳本結算
 
 環境變數（全部由 GitHub Secrets 注入）：
   OPENAI_API_KEY        內容生成
@@ -29,6 +31,8 @@ import guard
 import telegram_gate as tg
 import post_x
 import tracker
+import scans
+import ledger
 
 DRY = os.environ.get("DRY_RUN", "").strip() in ("1", "true", "yes")
 MODEL = os.environ.get("LLM_MODEL", "").strip() or None
@@ -295,6 +299,93 @@ def cmd_doctor() -> int:
 
 # ────────────────────────── 日誌摘要模式 ──────────────────────────
 
+def cmd_scan() -> int:
+    """跑齊三個結構性掃描，印出 anchor／basket／violation 貼所需嘅數字。
+
+    ⚠️ 呢個係內容核心。`move` 異動註記只係填數量，
+       真正冇人有嘅係下面三組數。
+    """
+    cfg = load_config()
+    log("═══ 結構性掃描 ═══")
+
+    markets = fetch.fetch_normalised()
+    if not markets:
+        log("抓唔到市場數據")
+        return 1
+
+    # ── C：negRisk 盤面效率（anchor 貼）──
+    log("\n── C  negRisk 盤面效率 ──")
+    boards = scans.fetch_negrisk_boards()
+    scored = scans.score_boards(boards)
+    rep = scans.board_report(scored)
+    if rep["n_boards"]:
+        log(f"  掃描 {rep['n_boards']} 個盤面")
+        log(f"  Σask 中位數 {rep['median_ask']}　（最低 {rep['min_ask']}）")
+        log(f"  Σbid 中位數 {rep['median_bid']}　（最高 {rep['max_bid']}）")
+        log(f"  違規：{rep['n_violations']} 個")
+        for v in rep["violations"][:5]:
+            log(f"    · {v['kind']}  Σask={v['sum_ask']:.4f} Σbid={v['sum_bid']:.4f}"
+                f"  深度 ${v['min_depth']:,.0f}  {v['title'][:56]}")
+    else:
+        log("  ⚠ 取唔到任何完整盤面報價")
+
+    # ── B：日期階梯（violation 貼）──
+    log("\n── B  日期階梯單調性 ──")
+    viol = scans.ladder_scan(markets)
+    for v in viol[:5]:
+        log(f"  · 差 {v['gap']*100:.1f}pt（{v['polarity']}）")
+        log(f"      早 {v['early']['deadline']} @ {v['early']['price']:.0%}"
+            f"  {v['early']['question'][:52]}")
+        log(f"      遲 {v['late']['deadline']} @ {v['late']['price']:.0%}"
+            f"  {v['late']['question'][:52]}")
+    if not viol:
+        log("  零違規 —— 呢個本身就係結論")
+
+    # ── A：政治冷門籃子（basket 貼）──
+    log("\n── A  政治冷門籃子 ──")
+    cands = scans.basket_candidates(markets)
+    log(f"  符合條件嘅市場：{len(cands)} 個")
+    added = ledger.add_candidates(cands)
+    mtm = ledger.mark_to_market(markets)
+    st = ledger.stats()
+    log(f"  帳本：{st['total']} 筆　未結算 {st['pending']}　已結算 {st['settled']}"
+        + (f"（YES {st['settled_yes']} / NO {st['settled_no']}）" if st["settled"] else ""))
+    if st["mean_entry"] is not None:
+        log(f"  籃內均價：入場 {st['mean_entry']:.4f} → 今日 {st['mean_current']:.4f}"
+            + (f"　漂移 {st['drift_pts']:+.1f}pt" if st["drift_pts"] is not None else ""))
+    if st["roi_pct"] is not None:
+        log(f"  已結算 ROI：{st['roi_pct']:+.1f}%（{st['settled']} 筆，樣本細，唔好過度解讀）")
+    due = ledger.due_settlement()
+    if due:
+        log(f"  ⚠ {len(due)} 筆已過結算日仲係 pending —— 去查結果再用 "
+            f"`run.py settle <market_id> YES|NO` 記低")
+        for r in due[:5]:
+            log(f"      {r['market_id'][:24]}  {r['question'][:50]}")
+
+    log("\n═══ 掃描完成 ═══")
+    return 0
+
+
+def cmd_settle() -> int:
+    """記錄一筆結算結果：run.py settle <market_id> YES|NO"""
+    if len(sys.argv) < 4:
+        print("用法：python src/run.py settle <market_id> YES|NO")
+        return 2
+    mid, outcome = sys.argv[2], sys.argv[3].upper()
+    if outcome not in ("YES", "NO"):
+        print("結果只可以係 YES 或 NO")
+        return 2
+    if ledger.settle(mid, outcome):
+        st = ledger.stats()
+        log(f"✓ 已記錄 {mid} = {outcome}")
+        log(f"  帳本：已結算 {st['settled']} 筆"
+            f"（YES {st['settled_yes']} / NO {st['settled_no']}）"
+            f"　ROI {st['roi_pct']:+.1f}%")
+        return 0
+    log(f"✗ 帳本入面搵唔到 {mid}（或者已經結算咗）")
+    return 1
+
+
 def cmd_digest() -> int:
     """每日送一次：今日寫過乜、邊啲到期回訪、邊啲應該有結果。"""
     text = tracker.digest()
@@ -333,6 +424,10 @@ def main() -> int:
         return cmd_doctor()
     if mode == "testpost":
         return cmd_testpost()
+    if mode == "scan":
+        return cmd_scan()
+    if mode == "settle":
+        return cmd_settle()
     print(__doc__)
     return 2
 

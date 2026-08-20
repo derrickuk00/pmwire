@@ -34,7 +34,15 @@ NON_DEADLINE_BY = re.compile(
 )
 
 # 真 deadline 嘅語法標記
-DEADLINE_CUE = re.compile(r"\b(by|before|on or before|prior to|no later than|until)\b", re.I)
+#
+# ⚠️ `through` 一定要有。「US ceasefire continues **through** September 30」
+#    呢類 persistence 型階梯冇 by／before，只有 through ——
+#    漏咗嘅話 DK 最重要嗰個伊朗停火家族喺階梯掃描度完全隱形。
+#    （2026-08-20 測試捉到，而且原本仲係「假通過」：兩腳都被過濾走，
+#      得出空清單啱好符合「零違規」嘅預期。）
+DEADLINE_CUE = re.compile(
+    r"\b(by|before|on or before|prior to|no later than|until|through|"
+    r"as of|at the end of)\b", re.I)
 
 
 def has_deadline_cue(title: str) -> bool:
@@ -150,7 +158,8 @@ def family_key(title: str) -> str:
     t = re.sub(r"\bq[1-4]\s*(?:of\s*)?20\d{2}\b", " ", t)
     t = re.sub(rf"\b({mon_alt})\.?\s+20\d{{2}}\b", " ", t)
     t = re.sub(r"\b20\d{2}\b", " ", t)
-    t = re.sub(r"\b(by|before|on or before|prior to|no later than|until|in)\b", " ", t)
+    t = re.sub(r"\b(by|before|on or before|prior to|no later than|until|in|"
+               r"through|as of|at the end of)\b", " ", t)
     # 數值區間都要剪走 —— 否則「post 200-219 tweets」同「post 220-239 tweets」
     # 會當成兩個唔同家族。2026-08-19 第五輪實測。
     t = re.sub(r"\b\d[\d,]*\s*(?:[-–—]|to)\s*\d[\d,]*\b", " ", t)

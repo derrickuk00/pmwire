@@ -109,6 +109,43 @@ def build_user_prompt(m: dict) -> str:
     return "\n".join(lines)
 
 
+def normalise_for_x(text: str) -> str:
+    """把段落內嘅硬換行收返做空格，保留段落之間嘅空行。
+
+    ⚠️ 點解需要呢個（2026-08-20 實測）：
+       稿件喺文件／code block 入面按 ~78 字元手動換行，
+       貼上 X 之後嗰啲硬換行會原樣保留，變成
+       「…and post what they」換行「find.」呢種參差斷句。
+       X 本身會按欄寬自動換行，任何段落內嘅 \\n 都係多餘而且礙眼。
+
+       規則：單個 \\n = 排版殘留 → 換成空格
+             連續 \\n\\n = 真段落分隔 → 保留
+    """
+    if not text:
+        return text
+    # 統一換行符
+    t = text.replace("\r\n", "\n").replace("\r", "\n")
+    # 先用哨兵保護段落分隔（兩個或以上換行）
+    t = re.sub(r"\n{2,}", "\x00", t)
+
+    # 單換行係排版殘留。但中文唔用空格分詞 ——
+    # 換行兩邊都係中日韓字元／全形標點嘅話，直接刪走，唔可以加空格，
+    # 否則會出現「1.02、 零階梯違規」呢種多餘空隙。
+    CJK = r"[　-〿㐀-䶿一-鿿＀-￯]"
+    t = re.sub(rf"(?<={CJK})[ \t]*\n[ \t]*(?={CJK})", "", t)
+    # 其餘（英文之間、中英之間）用空格接返
+    t = re.sub(r"[ \t]*\n[ \t]*", " ", t)
+
+    # 還原段落分隔
+    t = t.replace("\x00", "\n\n")
+    # 收拾多餘空格
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    # 中日韓字元同標點之間唔應該有空格
+    t = re.sub(rf"(?<={CJK}) +(?={CJK})", "", t)
+    t = "\n\n".join(p.strip() for p in t.split("\n\n"))
+    return t.strip()
+
+
 def _strip_fences(s: str) -> str:
     s = s.strip()
     s = re.sub(r"^```(?:json)?\s*", "", s)
@@ -140,8 +177,8 @@ def generate(m: dict, cfg: dict, model: str | None = None,
     except _llm.LLMError as e:
         raise RuntimeError(str(e)) from e
 
-    en = (obj.get("en") or "").strip()
-    zh = (obj.get("zh") or "").strip()
+    en = normalise_for_x((obj.get("en") or "").strip())
+    zh = normalise_for_x((obj.get("zh") or "").strip())
     if not en:
         raise RuntimeError("LLM 冇回英文內容")
 
